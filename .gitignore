@@ -1,0 +1,12 @@
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+data/
+app_config.json
+.env
+.env.*
+!.env.example
+*.log
+.DS_Store
+LocalPluginManager.lnk
