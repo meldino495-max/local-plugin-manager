@@ -34,7 +34,7 @@
 
 1. 打开 GitHub 仓库的 [Releases](https://github.com/meldino495-max/local-plugin-manager/releases)
 2. 下载 `LocalPluginManager-v*-windows-x64.zip` 并解压（包内为 `本地插件管理器.exe`；GitHub 资源名本身不能用中文）
-3. 放到任意文件夹后双击运行（首次会在同目录创建 `data/` 与 `app_config.json`）
+3. 放到任意文件夹后双击运行（首次会在同目录创建 `data/` 与 `app_config.json`，并写入开始菜单快捷方式，之后可在 Windows 搜索里搜「本地插件管理器」）
 
 发版方式（维护者）：推送版本标签即可自动打包并上传 Release，例如：
 

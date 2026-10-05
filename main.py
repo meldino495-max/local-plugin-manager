@@ -59,6 +59,14 @@ def main() -> int:
     except Exception:
         pass
 
+    # Frozen exe: Start Menu + App Paths so Windows Search finds 本地插件管理器
+    try:
+        from app.utils.windows_shell import ensure_start_menu_registration
+
+        ensure_start_menu_registration()
+    except Exception:
+        logging.getLogger(__name__).exception("Windows Search registration skipped")
+
     app = QApplication(sys.argv)
     app.setApplicationName(__app_name__)
     app.setApplicationVersion(__version__)
