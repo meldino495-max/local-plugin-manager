@@ -566,22 +566,47 @@ class MainWindow(QMainWindow):
             src_dlg.cleanup_download()
             return
 
+        from app.ui.privacy import TRUST_SOURCE_WARNING
+
         sample = "\n".join(f"  · {f}" for f in preview.sample_files[:15])
         more = ""
         if preview.file_count > 15:
             more = f"\n  … 等共 {preview.file_count} 个文件"
+        inner_note = ""
+        if preview.archive_inner_root:
+            inner_note = (
+                f"已自动跳过压缩包外层文件夹，使用含 manifest.json 的目录：\n"
+                f"  {preview.archive_inner_root}\n"
+                f"（只会把该目录内的文件写入插件路径，不会把外层文件夹本身拷进去）\n\n"
+            )
         msg = (
+            f"{TRUST_SOURCE_WARNING}\n\n"
             f"目标扩展：{ext.name}\n"
             f"来源：{src_dlg.source_note}\n"
             f"当前版本：{ext.version or '未知'}\n"
             f"压缩包版本：{preview.package_version}\n"
             f"目标路径：\n{preview.target_path}\n\n"
+            f"{inner_note}"
             f"将覆盖写入 {preview.file_count} 个文件（不会删除压缩包中没有的旧文件）。\n"
-            f"执行前会自动备份当前目录到版本历史。\n\n"
+            f"执行前会自动备份当前目录到版本历史，可在「版本历史」中回滚。\n\n"
             f"文件预览：\n{sample}{more}\n\n"
-            "确认继续？"
+            "确认来源可信并继续？"
         )
-        reply = QMessageBox.question(self, "确认更新", msg)
+        box = QMessageBox(self)
+        box.setWindowTitle("确认更新")
+        box.setIcon(QMessageBox.Icon.Warning)
+        box.setText(msg)
+        box.setStandardButtons(
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+        )
+        box.setDefaultButton(QMessageBox.StandardButton.No)
+        yes_btn = box.button(QMessageBox.StandardButton.Yes)
+        no_btn = box.button(QMessageBox.StandardButton.No)
+        if yes_btn is not None:
+            yes_btn.setText("来源可信，继续")
+        if no_btn is not None:
+            no_btn.setText("取消")
+        reply = box.exec()
         if reply != QMessageBox.StandardButton.Yes:
             cleanup_work_dir(self._pending_work)
             self._pending_work = None

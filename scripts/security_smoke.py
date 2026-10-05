@@ -13,7 +13,14 @@ if str(_ROOT) not in sys.path:
     sys.path.insert(0, str(_ROOT))
 
 from app.core.archive import ArchiveError, extract_archive
-from app.core.downloader import DownloadError, assert_url_safe, extract_gdrive_id
+from app.core.downloader import (
+    DownloadError,
+    assert_url_safe,
+    encode_onedrive_share_token,
+    extract_gdrive_id,
+    is_onedrive_url,
+    onedrive_direct_url,
+)
 
 
 def test_zip_slip_rejected() -> None:
@@ -38,6 +45,8 @@ def test_ssrf_blocked() -> None:
         "https://127.0.0.1/x",
         "https://localhost/x",
         "https://169.254.169.254/latest/meta-data/",
+        "https://100.64.0.1/x",  # CGNAT
+        "https://[::ffff:127.0.0.1]/x",  # IPv4-mapped loopback
         "file:///C:/Windows/win.ini",
         "https://user:pass@example.com/a.zip",
     ):
@@ -60,6 +69,34 @@ def test_gdrive_id() -> None:
     )
 
 
+def test_onedrive_encode() -> None:
+    u1 = "https://1drv.ms/u/c/AbCdEf123?e=xyz"
+    assert is_onedrive_url(u1)
+    assert is_onedrive_url("https://1drv.ms/u/s!Abcdef")
+    assert is_onedrive_url("https://onedrive.live.com/redir?resid=X")
+    assert not is_onedrive_url("https://example.com/a.zip")
+
+    token = encode_onedrive_share_token(u1)
+    assert token.startswith("u!")
+    assert "=" not in token
+    direct = onedrive_direct_url(u1)
+    assert direct.startswith("https://api.onedrive.com/v1.0/shares/u!")
+    assert direct.endswith("/root/content")
+    assert token in direct
+
+    # redir → download
+    redir = "https://onedrive.live.com/redir?resid=ABC&authkey=!XYZ"
+    out = onedrive_direct_url(redir)
+    assert "download" in out.lower()
+    assert "redir" not in urlparse_path(out).lower()
+
+
+def urlparse_path(url: str) -> str:
+    from urllib.parse import urlparse
+
+    return urlparse(url).path
+
+
 def test_safe_zip_ok() -> None:
     base = Path(tempfile.mkdtemp(prefix="bem_sec_ok_"))
     zpath = base / "ok.zip"
@@ -80,6 +117,8 @@ if __name__ == "__main__":
     print("ssrf_ok")
     test_gdrive_id()
     print("gdrive_ok")
+    test_onedrive_encode()
+    print("onedrive_ok")
     test_safe_zip_ok()
     print("safe_zip_ok")
     print("ALL_PASS")

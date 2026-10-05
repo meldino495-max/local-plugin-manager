@@ -133,39 +133,122 @@ def resolve_icon_path(ext_dir: Path, manifest: dict[str, Any] | None) -> str:
     return ""
 
 
+_JUNK_DIR_NAMES = {
+    "__macosx",
+    ".git",
+    ".svn",
+    ".hg",
+    "node_modules",
+    ".idea",
+    ".vscode",
+    "__pycache__",
+}
+
+
+def _is_junk_dir(name: str) -> bool:
+    return name.lower() in _JUNK_DIR_NAMES or name.startswith(".")
+
+
+def _manifest_looks_valid(manifest_path: Path) -> bool:
+    """True if file parses as a Chromium/Firefox extension manifest."""
+    data = _read_json(manifest_path)
+    if not data:
+        return False
+    # Prefer real extension manifests; still accept if name/version present.
+    if "manifest_version" in data:
+        return True
+    if data.get("name") and data.get("version"):
+        return True
+    return False
+
+
+def _candidate_score(root: Path, extract_base: Path) -> tuple[int, int, str]:
+    """
+    Lower is better:
+      - prefer valid extension manifest
+      - prefer shallower path under extract_base
+      - stable tie-break by path string
+    """
+    try:
+        rel = root.resolve().relative_to(extract_base.resolve())
+        depth = len(rel.parts)
+        rel_s = rel.as_posix()
+    except ValueError:
+        depth = 99
+        rel_s = str(root)
+    valid = 0 if _manifest_looks_valid(root / "manifest.json") else 1
+    return (valid, depth, rel_s.lower())
+
+
 def find_extension_root(extracted: Path) -> Path | None:
     """
     Locate the real extension root after archive extraction.
-    Accepts:
-      - flat layout with manifest.json at root
-      - single top-level folder containing manifest.json
-      - nested single-folder wrappers (up to 3 levels)
+
+    Handles common pack layouts:
+      - flat: manifest.json at extract root
+      - one wrapper folder (or several nested single folders) then manifest
+      - wrapper + readme/license junk beside the real folder
+      - deep search for the shallowest valid manifest.json
     """
     extracted = extracted.resolve()
-    if (extracted / "manifest.json").is_file():
+    if not extracted.is_dir():
+        return None
+
+    if (extracted / "manifest.json").is_file() and _manifest_looks_valid(
+        extracted / "manifest.json"
+    ):
         return extracted
 
+    # Unwrap nested single-directory wrappers (GitHub zip / 网盘打包常见).
     current = extracted
-    for _ in range(3):
-        children = [p for p in current.iterdir() if not p.name.startswith(".")]
-        dirs = [p for p in children if p.is_dir()]
+    for _ in range(8):
+        try:
+            children = [p for p in current.iterdir() if not _is_junk_dir(p.name)]
+        except OSError:
+            break
+        dirs = [p for p in children if p.is_dir() and not _is_junk_dir(p.name)]
         files = [p for p in children if p.is_file()]
-        # Ignore macOS junk
-        dirs = [d for d in dirs if d.name != "__MACOSX"]
         if (current / "manifest.json").is_file():
             return current
-        if len(dirs) == 1 and not any(f.name == "manifest.json" for f in files):
+        # Only one real folder and no sibling manifest → enter it
+        if len(dirs) == 1 and not any(f.name.lower() == "manifest.json" for f in files):
             current = dirs[0]
             continue
-        # Multiple items: prefer a dir that has manifest.json
-        for d in dirs:
-            if (d / "manifest.json").is_file():
-                return d
+        # Multiple siblings: if exactly one child dir has manifest.json, use it
+        hits = [d for d in dirs if (d / "manifest.json").is_file()]
+        if len(hits) == 1:
+            return hits[0]
+        if len(hits) > 1:
+            return min(hits, key=lambda d: _candidate_score(d, extracted))
         break
 
-    # Deep search (bounded)
-    for p in extracted.rglob("manifest.json"):
-        if "__MACOSX" in p.parts:
-            continue
-        return p.parent
-    return None
+    # Bounded deep search — pick shallowest valid manifest (skip junk paths)
+    valid: list[Path] = []
+    weak: list[Path] = []
+    try:
+        for p in extracted.rglob("manifest.json"):
+            if not p.is_file():
+                continue
+            if any(_is_junk_dir(part) for part in p.parts):
+                continue
+            parent = p.parent
+            if _manifest_looks_valid(p):
+                valid.append(parent)
+            else:
+                weak.append(parent)
+    except OSError:
+        return None
+
+    pool = valid or weak
+    if not pool:
+        return None
+    return min(pool, key=lambda d: _candidate_score(d, extracted))
+
+
+def describe_extension_root(extracted: Path, root: Path) -> str:
+    """Human-readable path of extension root relative to extract dir ('' if same)."""
+    try:
+        rel = root.resolve().relative_to(extracted.resolve())
+        return "" if rel == Path(".") else rel.as_posix()
+    except ValueError:
+        return str(root)

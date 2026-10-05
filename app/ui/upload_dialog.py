@@ -18,7 +18,7 @@ from PyQt6.QtWidgets import (
 )
 
 from app.core.downloader import DownloadError, DownloadResult, download_archive
-from app.ui.privacy import PRIVACY_SUMMARY
+from app.ui.privacy import PRIVACY_SUMMARY, TRUST_SOURCE_WARNING
 
 
 class _DownloadWorker(QObject):
@@ -57,14 +57,16 @@ class UploadSourceDialog(QDialog):
         layout = QVBoxLayout(self)
         layout.addWidget(
             QLabel(
-                "选择本地压缩包，或填写下载链接（支持 Google Drive "
-                "`https://drive.google.com/file/d/...` 以及其它直接下载链接）。"
+                "选择本地压缩包，或填写下载链接。\n"
+                "支持 Google Drive、OneDrive（如 https://1drv.ms/u/c/... / "
+                "https://1drv.ms/u/s!...），以及其它直接 https 下载链接。"
             )
         )
         privacy = QLabel(
             f"隐私：{PRIVACY_SUMMARY}\n"
             "粘贴的链接只用于本次本机下载，不会被软件发送给其他人。\n"
-            "安全：仅允许 https://；禁止本机/内网地址；解压有路径穿越与体积限制。"
+            "安全：仅允许 https://；禁止本机/内网地址；解压有路径穿越与体积限制。\n"
+            f"{TRUST_SOURCE_WARNING}"
         )
         privacy.setWordWrap(True)
         privacy.setStyleSheet(
@@ -90,7 +92,7 @@ class UploadSourceDialog(QDialog):
         layout.addWidget(self.radio_url)
         self.url_edit = QLineEdit()
         self.url_edit.setPlaceholderText(
-            "https://drive.google.com/file/d/xxxxxxxx/view?usp=sharing"
+            "https://1drv.ms/u/c/...  或  https://drive.google.com/file/d/..."
         )
         layout.addWidget(self.url_edit)
 

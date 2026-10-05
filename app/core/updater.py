@@ -15,7 +15,7 @@ from app.core.archive import (
     extract_archive,
     snapshot_directory,
 )
-from app.core.manifest import find_extension_root, parse_manifest
+from app.core.manifest import describe_extension_root, find_extension_root, parse_manifest
 from app.models.extension import ExtensionInfo, VersionRecord
 from app.models.store import AppStore
 from app.utils.paths import archives_root, temp_root, versions_root
@@ -31,6 +31,8 @@ class UpdatePreview:
     target_path: str
     file_count: int
     sample_files: list[str] = field(default_factory=list)
+    # Relative path inside archive extract dir, e.g. "MyExt-v2" or "Outer/Inner"
+    archive_inner_root: str = ""
 
 
 @dataclass
@@ -86,6 +88,7 @@ class ExtensionUpdater:
             for p in root.rglob("*")
             if p.is_file() and "__MACOSX" not in p.parts and not p.name.startswith("._")
         ]
+        inner = describe_extension_root(extract_dir, root)
         preview = UpdatePreview(
             package_version=str(info.get("version") or "unknown"),
             package_name=str(info.get("name") or ext.name),
@@ -93,11 +96,11 @@ class ExtensionUpdater:
             target_path=str(target.resolve()),
             file_count=len(files),
             sample_files=files[:30],
+            archive_inner_root=inner,
         )
         # Stash paths on work dir marker
         (work / "source_root.txt").write_text(str(root), encoding="utf-8")
         return work, preview
-
     def apply_upload(
         self,
         ext: ExtensionInfo,

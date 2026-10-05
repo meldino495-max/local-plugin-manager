@@ -86,6 +86,34 @@ def main() -> None:
     assert res3.ok, res3.message
     assert (ext_dir / "a.txt").read_text(encoding="utf-8") == "new-a"
     print("LATEST_OK", len(store.get_history(ext.uid)))
+    # double-wrapped folder: Outer/Inner/manifest.json
+    wrap = base / "wrap_src"
+    (wrap / "Outer" / "Inner").mkdir(parents=True)
+    (wrap / "Outer" / "Inner" / "manifest.json").write_text(
+        json.dumps({"name": "Demo Ext", "version": "3.0.0", "manifest_version": 3}),
+        encoding="utf-8",
+    )
+    (wrap / "Outer" / "Inner" / "a.txt").write_text("v3-a", encoding="utf-8")
+    (wrap / "README.txt").write_text("ignore me", encoding="utf-8")
+    wrap_zip = base / "wrap.zip"
+    with zipfile.ZipFile(wrap_zip, "w") as z:
+        for p in wrap.rglob("*"):
+            if p.is_file():
+                z.write(p, p.relative_to(wrap).as_posix())
+    work2, preview2 = up.prepare_upload(ext, wrap_zip)
+    assert preview2.archive_inner_root.replace("\\", "/") in {
+        "Outer/Inner",
+        "Outer\\Inner",
+    } or preview2.archive_inner_root.endswith("Inner"), preview2.archive_inner_root
+    assert preview2.package_version == "3.0.0"
+    res4 = up.apply_upload(ext, wrap_zip, work2)
+    cleanup_work_dir(work2)
+    assert res4.ok, res4.message
+    assert (ext_dir / "a.txt").read_text(encoding="utf-8") == "v3-a"
+    assert not (ext_dir / "Outer").exists()
+    assert not (ext_dir / "README.txt").exists()
+    print("WRAP_SKIP_OK", preview2.archive_inner_root)
+
     shutil.rmtree(base, ignore_errors=True)
     print("DONE")
 
