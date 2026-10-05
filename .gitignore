@@ -10,3 +10,6 @@ app_config.json
 *.log
 .DS_Store
 LocalPluginManager.lnk
+build/
+dist/
+*.spec.bak

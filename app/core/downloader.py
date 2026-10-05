@@ -13,7 +13,7 @@ from http.cookiejar import CookieJar
 from pathlib import Path
 from typing import Callable
 from urllib.error import HTTPError, URLError
-from urllib.parse import parse_qs, unquote, urlparse, urljoin, urlunparse, urlencode
+from urllib.parse import parse_qs, unquote, urlparse, urljoin, urlunparse, urlencode, quote
 from urllib.request import (
     HTTPCookieProcessor,
     HTTPRedirectHandler,
@@ -121,10 +121,60 @@ def encode_onedrive_share_token(share_url: str) -> str:
 
 # Browser-anonymous Badger credentials used by OneDrive web for public shares
 # (required for new 1drv.ms/u/c/... links after Microsoft migration).
+# These are public client identifiers shipped by Microsoft browsers — not app secrets.
 _BADGER_TOKEN_URL = "https://api-badgerp.svc.ms/v1.0/token"
 _BADGER_APP_ID = "1141147648"
 _BADGER_APP_UUID = "5cbed6ac-a083-4e14-b191-b4ba07653de2"
 _PERSONAL_SHARES_API = "https://my.microsoftpersonalcontent.com/_api/v2.0/shares"
+
+# After following a share link / resolving @content.downloadUrl, only talk to
+# Microsoft OneDrive / SharePoint related hosts (defense-in-depth vs open redirect).
+_MS_DOWNLOAD_HOST_SUFFIXES = (
+    "1drv.ms",
+    "1drv.com",
+    "onedrive.live.com",
+    "onedrive.com",
+    "api.onedrive.com",
+    "sharepoint.com",
+    "sharepoint.cn",
+    "sharepoint-df.com",
+    "microsoftpersonalcontent.com",
+    "svc.ms",
+    "live.com",
+)
+
+
+def _is_ms_onedrive_host(host: str | None) -> bool:
+    host = (host or "").lower().strip(".")
+    if not host:
+        return False
+    return any(host == s or host.endswith("." + s) for s in _MS_DOWNLOAD_HOST_SUFFIXES)
+
+
+def _assert_ms_onedrive_url(url: str, *, what: str = "OneDrive") -> None:
+    assert_url_safe(url, allow_http=False)
+    host = urlparse(url).hostname
+    if not _is_ms_onedrive_host(host):
+        raise DownloadError(f"{what} 跳转到了非微软下载域名，已中止: {host or '?'}")
+
+
+def _validate_onedrive_token(value: str, *, kind: str) -> str:
+    """Reject path/query metacharacters in IDs interpolated into request URLs."""
+    value = (value or "").strip()
+    if not value:
+        raise DownloadError(f"OneDrive {kind} 为空")
+    patterns = {
+        "redeem": r"[A-Za-z0-9_-]{8,2048}",
+        "resid": r"[A-Za-z0-9!._-]{3,256}",
+        "cid": r"[A-Za-z0-9]{3,128}",
+        "authkey": r"!?[A-Za-z0-9_-]{3,256}",
+        "share_user": r"[A-Za-z0-9._-]{1,256}",
+        "share_token": r"[A-Za-z0-9_-]{6,512}",
+    }
+    pat = patterns.get(kind)
+    if not pat or not re.fullmatch(pat, value):
+        raise DownloadError(f"OneDrive {kind} 含非法字符，已拒绝")
+    return value
 
 
 @dataclass
@@ -197,8 +247,12 @@ def _sharepoint_force_download_url(url: str) -> str | None:
     # /:u:/g/personal/{user}/{shareToken}
     m = re.search(r"/:[uwxi]:/g/personal/([^/]+)/([^/?#]+)", path, re.I)
     if m:
-        user, token = m.group(1), m.group(2)
-        return f"https://{host}/personal/{user}/_layouts/15/download.aspx?share={token}"
+        user = _validate_onedrive_token(unquote(m.group(1)), kind="share_user")
+        token = _validate_onedrive_token(unquote(m.group(2)), kind="share_token")
+        return (
+            f"https://{host}/personal/{quote(user, safe='._-')}"
+            f"/_layouts/15/download.aspx?share={quote(token, safe='_-')}"
+        )
 
     # /:u:/r/personal/.../Documents/file?web=1 → download=1
     qs = dict(parse_qs(parsed.query, keep_blank_values=True))
@@ -230,6 +284,17 @@ def _parse_onedrive_access(expanded_url: str) -> _OneDriveAccess:
         resid = id_
     if not cid and resid and "!" in resid:
         cid = resid.split("!", 1)[0]
+
+    # Validate only fields that are present — empty means unused path
+    if redeem:
+        redeem = _validate_onedrive_token(redeem, kind="redeem")
+    if resid:
+        resid = _validate_onedrive_token(resid, kind="resid")
+    if cid:
+        cid = _validate_onedrive_token(cid, kind="cid")
+    if auth_key:
+        auth_key = _validate_onedrive_token(auth_key, kind="authkey")
+
     return _OneDriveAccess(
         container_id=cid,
         resid=resid,
@@ -240,7 +305,7 @@ def _parse_onedrive_access(expanded_url: str) -> _OneDriveAccess:
 
 
 def _follow_to_final_url(opener, url: str) -> str:
-    assert_url_safe(url, allow_http=False)
+    _assert_ms_onedrive_url(url, what="OneDrive 起始链接")
     try:
         resp = opener.open(_request(url), timeout=60)
     except HTTPError as e:
@@ -254,7 +319,7 @@ def _follow_to_final_url(opener, url: str) -> str:
         resp.close()
     except Exception:
         pass
-    assert_url_safe(final, allow_http=False)
+    _assert_ms_onedrive_url(final, what="OneDrive 重定向")
     return final
 
 
@@ -293,8 +358,9 @@ def _driveitem_download_url(opener, access: _OneDriveAccess) -> tuple[str, str]:
     """
     if access.redeem:
         token = _badger_token(opener)
-        api = f"{_PERSONAL_SHARES_API}/u!{access.redeem}/driveitem"
-        assert_url_safe(api, allow_http=False)
+        redeem = _validate_onedrive_token(access.redeem, kind="redeem")
+        api = f"{_PERSONAL_SHARES_API}/u!{redeem}/driveitem"
+        _assert_ms_onedrive_url(api, what="OneDrive API")
         req = Request(
             api,
             headers={
@@ -305,13 +371,13 @@ def _driveitem_download_url(opener, access: _OneDriveAccess) -> tuple[str, str]:
             },
         )
     elif access.resid and access.container_id:
-        api = (
-            f"https://api.onedrive.com/v1.0/drives/{access.container_id}"
-            f"/items/{access.resid}"
-        )
+        cid = _validate_onedrive_token(access.container_id, kind="cid")
+        resid = _validate_onedrive_token(access.resid, kind="resid")
+        api = f"https://api.onedrive.com/v1.0/drives/{quote(cid, safe='')}/items/{quote(resid, safe='!')}"
         if access.auth_key:
-            api += f"?authkey={access.auth_key}"
-        assert_url_safe(api, allow_http=False)
+            auth = _validate_onedrive_token(access.auth_key, kind="authkey")
+            api += f"?authkey={quote(auth, safe='!_-')}"
+        _assert_ms_onedrive_url(api, what="OneDrive API")
         req = Request(
             api,
             headers={
@@ -328,8 +394,8 @@ def _driveitem_download_url(opener, access: _OneDriveAccess) -> tuple[str, str]:
         resp = opener.open(req, timeout=60)
         data = json.loads(resp.read().decode("utf-8", errors="replace"))
     except HTTPError as e:
-        detail = e.read()[:300].decode("utf-8", errors="replace")
-        raise DownloadError(f"解析 OneDrive 文件信息失败: HTTP {e.code} {detail}") from e
+        # Do not surface raw API bodies (may include tokens / internal fields) to UI.
+        raise DownloadError(f"解析 OneDrive 文件信息失败: HTTP {e.code}") from e
     except Exception as e:
         raise DownloadError(f"解析 OneDrive 文件信息失败: {e}") from e
 
@@ -350,7 +416,7 @@ def _driveitem_download_url(opener, access: _OneDriveAccess) -> tuple[str, str]:
         raise DownloadError(
             "OneDrive 未返回下载地址。请确认链接是「知道链接的任何人可查看」的文件分享。"
         )
-    assert_url_safe(str(dl), allow_http=False)
+    _assert_ms_onedrive_url(str(dl), what="OneDrive 下载地址")
     return str(dl), name
 
 
@@ -724,8 +790,13 @@ def _download_with_opener(
     dest_dir: Path,
     progress: ProgressCb | None = None,
     preferred_name: str = "",
+    *,
+    require_ms_host: bool = True,
 ) -> DownloadResult:
-    assert_url_safe(url, allow_http=False)
+    if require_ms_host:
+        _assert_ms_onedrive_url(url, what="下载")
+    else:
+        assert_url_safe(url, allow_http=False)
     try:
         resp = opener.open(_request(url), timeout=120)
     except HTTPError as e:
@@ -734,7 +805,10 @@ def _download_with_opener(
         raise DownloadError(f"下载失败: {e}") from e
 
     final_url = resp.geturl()
-    assert_url_safe(final_url, allow_http=False)
+    if require_ms_host:
+        _assert_ms_onedrive_url(final_url, what="下载重定向")
+    else:
+        assert_url_safe(final_url, allow_http=False)
     cd = resp.headers.get("Content-Disposition")
     filename = (
         _filename_from_cd(cd)

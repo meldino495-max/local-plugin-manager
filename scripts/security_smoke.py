@@ -90,6 +90,25 @@ def test_onedrive_encode() -> None:
     assert "download" in out.lower()
     assert "redir" not in urlparse_path(out).lower()
 
+    # Injected redeem / path metacharacters must be rejected
+    from app.core.downloader import DownloadError, _parse_onedrive_access, _validate_onedrive_token
+
+    try:
+        _validate_onedrive_token("../evil", kind="redeem")
+        raise AssertionError("should reject")
+    except DownloadError:
+        pass
+    try:
+        _validate_onedrive_token("abc/def", kind="cid")
+        raise AssertionError("should reject")
+    except DownloadError:
+        pass
+    try:
+        _parse_onedrive_access("https://onedrive.live.com/?redeem=abc%2F..%2Fevil&id=CID!1&cid=CID")
+        raise AssertionError("should reject bad redeem")
+    except DownloadError:
+        pass
+
 
 def urlparse_path(url: str) -> str:
     from urllib.parse import urlparse

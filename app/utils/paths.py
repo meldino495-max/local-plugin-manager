@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import logging
 import shutil
+import sys
 from pathlib import Path
 from typing import Any
 
@@ -11,12 +12,35 @@ log = logging.getLogger(__name__)
 _data_dir_override: Path | None = None
 
 
+def _is_frozen() -> bool:
+    return bool(getattr(sys, "frozen", False))
+
+
 def project_root() -> Path:
+    """
+    Writable app root (config / data next to the program).
+    When frozen (PyInstaller), this is the folder containing the .exe.
+    """
+    if _is_frozen():
+        return Path(sys.executable).resolve().parent
     return Path(__file__).resolve().parents[2]
 
 
+def bundle_root() -> Path:
+    """
+    Read-only bundled assets root.
+    When frozen, PyInstaller extracts to sys._MEIPASS.
+    """
+    if _is_frozen():
+        meipass = getattr(sys, "_MEIPASS", None)
+        if meipass:
+            return Path(meipass)
+        return Path(sys.executable).resolve().parent
+    return project_root()
+
+
 def resources_dir() -> Path:
-    return project_root() / "resources"
+    return bundle_root() / "resources"
 
 
 def app_icon_path() -> Path:

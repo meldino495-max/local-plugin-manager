@@ -1,0 +1,67 @@
+name: Release Windows exe
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt -r requirements-build.txt
+
+      - name: Security smoke (no network)
+        run: python scripts/security_smoke.py
+
+      - name: Build exe
+        run: python scripts/build_exe.py
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: LocalPluginManager-windows-x64
+          path: dist/LocalPluginManager.exe
+          if-no-files-found: error
+
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: LocalPluginManager-windows-x64
+          path: release-assets
+
+      - name: Rename with tag
+        run: |
+          TAG="${GITHUB_REF_NAME}"
+          mv "release-assets/LocalPluginManager.exe" \
+             "release-assets/LocalPluginManager-${TAG}-windows-x64.exe"
+          ls -la release-assets
+
+      - name: Publish GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: release-assets/LocalPluginManager-*-windows-x64.exe
+          generate_release_notes: true
+          draft: false
+          fail_on_unmatched_files: true

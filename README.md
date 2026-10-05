@@ -25,10 +25,35 @@
 - 更新前强制快照当前文件到 `data/versions/`
 - 上传的压缩包副本保存在 `data/archives/`
 - **合并覆盖**：只替换/新增压缩包里的文件，不删除目标里多出来的旧文件
-- **下载链接仅允许 HTTPS**，并禁止访问本机/内网地址（防 SSRF）
-- 软件不会上传你的插件或外传 Google 链接（见应用内「隐私说明」）
+- **下载链接仅允许 HTTPS**，并禁止访问本机/内网地址（防 SSRF）；支持 Google Drive / OneDrive 公开文件分享链接
+- 软件不会上传你的插件或外传网盘链接（见应用内「隐私说明」）
 
 ## 安装与运行
+
+### 下载 Windows 可执行文件（推荐）
+
+1. 打开 GitHub 仓库的 [Releases](https://github.com/meldino495-max/local-plugin-manager/releases)
+2. 下载 `LocalPluginManager-v*-windows-x64.exe`
+3. 放到任意文件夹后双击运行（首次会在同目录创建 `data/` 与 `app_config.json`）
+
+发版方式（维护者）：推送版本标签即可自动打包并上传 Release，例如：
+
+```bash
+git tag v1.1.0
+git push origin v1.1.0
+```
+
+本地手动打包：
+
+```bash
+# 双击 scripts\build_exe.bat
+# 或：
+pip install -r requirements.txt -r requirements-build.txt
+python scripts/build_exe.py
+# 产物：dist\LocalPluginManager.exe
+```
+
+### 从源码运行
 
 **最简单**：双击 `打开.bat`（首次会自动创建虚拟环境并安装依赖）。
 
