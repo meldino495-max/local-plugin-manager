@@ -63,7 +63,7 @@ jobs:
           name: LocalPluginManager-windows-x64
           path: release-assets
 
-      - name: Rename with tag
+      - name: Pack zip (Chinese exe inside)
         env:
           TAG: ${{ github.ref_name }}
         run: |
@@ -73,22 +73,36 @@ jobs:
             echo "Refusing unexpected tag name: $TAG" >&2
             exit 1
           fi
-          # GitHub Release asset names strip non-ASCII; ship an ASCII download name.
-          # The on-disk/local build name remains 本地插件管理器.exe.
+          # GitHub Release asset *names* strip non-ASCII, so publish an ASCII .zip
+          # that contains 本地插件管理器.exe (Unicode preserved inside the archive).
           src=$(find release-assets -maxdepth 1 -type f -name '*.exe' | head -n 1)
           if [[ -z "$src" ]]; then
             echo "No exe found in release-assets" >&2
             ls -la release-assets >&2 || true
             exit 1
           fi
-          mv "$src" "release-assets/LocalPluginManager-${TAG}-windows-x64.exe"
+          export SRC_PATH="$src"
+          export ZIP_NAME="LocalPluginManager-${TAG}-windows-x64.zip"
+          python3 <<'PY'
+          import os
+          import zipfile
+          from pathlib import Path
+
+          src = Path(os.environ["SRC_PATH"])
+          out = Path("release-assets") / os.environ["ZIP_NAME"]
+          with zipfile.ZipFile(out, "w", compression=zipfile.ZIP_DEFLATED) as zf:
+              zf.write(src, arcname="本地插件管理器.exe")
+          src.unlink(missing_ok=True)
+          print(f"Wrote {out} ({out.stat().st_size} bytes)")
+          print("Members:", zipfile.ZipFile(out).namelist())
+          PY
           ls -la release-assets
 
       - name: Publish GitHub Release
         # softprops/action-gh-release@v3.0.3 (Node 24)
         uses: softprops/action-gh-release@efb35369e0ad2afab669f228072c1b0d510eae64
         with:
-          files: release-assets/LocalPluginManager-*-windows-x64.exe
+          files: release-assets/LocalPluginManager-*-windows-x64.zip
           generate_release_notes: true
           draft: false
           fail_on_unmatched_files: true
