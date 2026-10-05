@@ -28,6 +28,6 @@ if errorlevel 1 (
 )
 
 echo.
-echo Done: dist\LocalPluginManager.exe
+echo Done: dist\本地插件管理器.exe
 pause
 endlocal

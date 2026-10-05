@@ -47,7 +47,7 @@ exe = EXE(
     a.zipfiles,
     a.datas,
     [],
-    name="LocalPluginManager",
+    name="本地插件管理器",
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,

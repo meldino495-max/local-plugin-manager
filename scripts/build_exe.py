@@ -1,5 +1,5 @@
 """
-Build LocalPluginManager.exe with PyInstaller (Windows).
+Build 本地插件管理器.exe with PyInstaller (Windows).
 
 Usage (from repo root):
   python scripts/build_exe.py
@@ -16,6 +16,7 @@ ROOT = Path(__file__).resolve().parents[1]
 SPEC = ROOT / "LocalPluginManager.spec"
 DIST = ROOT / "dist"
 BUILD = ROOT / "build"
+EXE_NAME = "本地插件管理器.exe"
 
 
 def main() -> int:
@@ -50,9 +51,12 @@ def main() -> int:
     print("Running:", " ".join(cmd))
     subprocess.check_call(cmd, cwd=str(ROOT))
 
-    exe = DIST / "LocalPluginManager.exe"
+    exe = DIST / EXE_NAME
     if not exe.is_file():
         print("Build finished but exe not found:", exe, file=sys.stderr)
+        # Help diagnose unexpected ASCII output names
+        if DIST.is_dir():
+            print("dist contents:", [p.name for p in DIST.iterdir()], file=sys.stderr)
         return 1
     size_mb = exe.stat().st_size / (1024 * 1024)
     print(f"OK: {exe} ({size_mb:.1f} MB)")

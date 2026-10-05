@@ -33,7 +33,7 @@
 ### 下载 Windows 可执行文件（推荐）
 
 1. 打开 GitHub 仓库的 [Releases](https://github.com/meldino495-max/local-plugin-manager/releases)
-2. 下载 `LocalPluginManager-v*-windows-x64.exe`
+2. 下载 `本地插件管理器-v*-windows-x64.exe`
 3. 放到任意文件夹后双击运行（首次会在同目录创建 `data/` 与 `app_config.json`）
 
 发版方式（维护者）：推送版本标签即可自动打包并上传 Release，例如：
@@ -50,7 +50,7 @@ git push origin v1.1.0
 # 或：
 pip install -r requirements.txt -r requirements-build.txt
 python scripts/build_exe.py
-# 产物：dist\LocalPluginManager.exe
+# 产物：dist\本地插件管理器.exe
 ```
 
 ### 从源码运行
