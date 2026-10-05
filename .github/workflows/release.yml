@@ -73,15 +73,22 @@ jobs:
             echo "Refusing unexpected tag name: $TAG" >&2
             exit 1
           fi
-          mv "release-assets/本地插件管理器.exe" \
-             "release-assets/本地插件管理器-${TAG}-windows-x64.exe"
+          # GitHub Release asset names strip non-ASCII; ship an ASCII download name.
+          # The on-disk/local build name remains 本地插件管理器.exe.
+          src=$(find release-assets -maxdepth 1 -type f -name '*.exe' | head -n 1)
+          if [[ -z "$src" ]]; then
+            echo "No exe found in release-assets" >&2
+            ls -la release-assets >&2 || true
+            exit 1
+          fi
+          mv "$src" "release-assets/LocalPluginManager-${TAG}-windows-x64.exe"
           ls -la release-assets
 
       - name: Publish GitHub Release
         # softprops/action-gh-release@v3.0.3 (Node 24)
         uses: softprops/action-gh-release@efb35369e0ad2afab669f228072c1b0d510eae64
         with:
-          files: release-assets/本地插件管理器-*-windows-x64.exe
+          files: release-assets/LocalPluginManager-*-windows-x64.exe
           generate_release_notes: true
           draft: false
           fail_on_unmatched_files: true
