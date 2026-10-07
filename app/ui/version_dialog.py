@@ -17,7 +17,7 @@ from PyQt6.QtWidgets import (
 )
 
 from app.core.updater import ExtensionUpdater
-from app.models.extension import ExtensionInfo
+from app.models.extension import ExtensionInfo, VersionRecord
 from app.models.store import AppStore
 
 
@@ -43,8 +43,10 @@ class VersionDialog(QDialog):
         self.ext = ext
         self.store = store
         self.updater = updater
+        self.history_changed = False
         self.setWindowTitle(f"版本历史 — {ext.name}")
-        self.resize(820, 440)
+        self.resize(900, 480)
+        self._rows: list[VersionRecord] = []
         self._build()
         self.reload()
 
@@ -54,7 +56,8 @@ class VersionDialog(QDialog):
             QLabel(
                 f"当前安装路径：{self.ext.path}\n"
                 f"当前版本号：{self.ext.version or '未知'}\n"
-                "可恢复历史版本、升到最新保存包，或把任一版本导出为 zip / 7z。"
+                "可恢复历史版本、升到最新保存包、导出版本，或删除选中/全部历史记录。"
+                "（按住 Ctrl / Shift 可多选）"
             )
         )
 
@@ -63,7 +66,7 @@ class VersionDialog(QDialog):
             ["版本号", "标签", "时间", "类型", "备注", "最新"]
         )
         self.table.setSelectionBehavior(self.table.SelectionBehavior.SelectRows)
-        self.table.setSelectionMode(self.table.SelectionMode.SingleSelection)
+        self.table.setSelectionMode(self.table.SelectionMode.ExtendedSelection)
         self.table.setEditTriggers(self.table.EditTrigger.NoEditTriggers)
         self.table.horizontalHeader().setStretchLastSection(True)
         layout.addWidget(self.table)
@@ -75,18 +78,28 @@ class VersionDialog(QDialog):
         self.btn_export_7z = QPushButton("导出 7z")
         self.btn_export_current = QPushButton("导出当前安装")
         self.btn_open = QPushButton("打开版本文件位置")
+        self.btn_delete = QPushButton("删除选中")
+        self.btn_clear = QPushButton("清空本插件历史")
+        self.btn_delete.setToolTip("删除选中的历史记录，并清理对应快照/压缩包文件")
+        self.btn_clear.setToolTip("删除该插件的全部历史记录与关联文件")
+
         self.btn_restore.clicked.connect(self._restore_selected)
         self.btn_latest.clicked.connect(self._restore_latest)
         self.btn_export_zip.clicked.connect(lambda: self._export_selected("zip"))
         self.btn_export_7z.clicked.connect(lambda: self._export_selected("7z"))
         self.btn_export_current.clicked.connect(self._export_current)
         self.btn_open.clicked.connect(self._open_files)
+        self.btn_delete.clicked.connect(self._delete_selected)
+        self.btn_clear.clicked.connect(self._clear_all)
+
         row.addWidget(self.btn_restore)
         row.addWidget(self.btn_latest)
         row.addWidget(self.btn_export_zip)
         row.addWidget(self.btn_export_7z)
         row.addWidget(self.btn_export_current)
         row.addWidget(self.btn_open)
+        row.addWidget(self.btn_delete)
+        row.addWidget(self.btn_clear)
         row.addStretch(1)
         layout.addLayout(row)
 
@@ -115,21 +128,38 @@ class VersionDialog(QDialog):
                     item.setData(Qt.ItemDataRole.UserRole, rec.id)
                 self.table.setItem(i, j, item)
         self.table.resizeColumnsToContents()
+        has = bool(hist)
+        self.btn_delete.setEnabled(has)
+        self.btn_clear.setEnabled(has)
 
-    def _selected_record(self):
+    def _selected_records(self) -> list[VersionRecord]:
         rows = self.table.selectionModel().selectedRows()
-        if not rows:
-            return None
-        idx = rows[0].row()
-        if idx < 0 or idx >= len(self._rows):
-            return None
-        return self._rows[idx]
+        out: list[VersionRecord] = []
+        seen: set[str] = set()
+        for model_idx in rows:
+            idx = model_idx.row()
+            if idx < 0 or idx >= len(self._rows):
+                continue
+            rec = self._rows[idx]
+            if rec.id in seen:
+                continue
+            seen.add(rec.id)
+            out.append(rec)
+        return out
+
+    def _selected_record(self) -> VersionRecord | None:
+        selected = self._selected_records()
+        return selected[0] if selected else None
 
     def _restore_selected(self) -> None:
-        rec = self._selected_record()
-        if rec is None:
+        selected = self._selected_records()
+        if not selected:
             QMessageBox.information(self, "提示", "请先选择一个版本")
             return
+        if len(selected) > 1:
+            QMessageBox.information(self, "提示", "恢复只能选择一个版本")
+            return
+        rec = selected[0]
         reply = QMessageBox.question(
             self,
             "确认恢复",
@@ -139,6 +169,7 @@ class VersionDialog(QDialog):
             return
         result = self.updater.restore_record(self.ext, rec)
         if result.ok:
+            self.history_changed = True
             QMessageBox.information(self, "完成", result.message)
             self.accept()
         else:
@@ -154,16 +185,68 @@ class VersionDialog(QDialog):
             return
         result = self.updater.restore_latest(self.ext)
         if result.ok:
+            self.history_changed = True
             QMessageBox.information(self, "完成", result.message)
             self.accept()
         else:
             QMessageBox.critical(self, "失败", result.message)
 
+    def _delete_selected(self) -> None:
+        selected = self._selected_records()
+        if not selected:
+            QMessageBox.information(self, "提示", "请先选择要删除的历史记录（可多选）")
+            return
+        labels = "\n".join(
+            f"· {r.version or '?'}  ({r.label or r.source})  {r.created_at}"
+            for r in selected[:12]
+        )
+        more = "" if len(selected) <= 12 else f"\n… 另有 {len(selected) - 12} 条"
+        reply = QMessageBox.question(
+            self,
+            "确认删除",
+            f"确定删除选中的 {len(selected)} 条历史记录吗？\n"
+            "对应的快照/压缩包文件也会一并删除，且不可恢复。\n\n"
+            f"{labels}{more}",
+        )
+        if reply != QMessageBox.StandardButton.Yes:
+            return
+        n = self.store.delete_versions(
+            self.ext.uid, [r.id for r in selected], delete_files=True
+        )
+        self.history_changed = True
+        QMessageBox.information(self, "已删除", f"已删除 {n} 条历史记录。")
+        self.reload()
+
+    def _clear_all(self) -> None:
+        hist = self.store.get_history(self.ext.uid)
+        if not hist:
+            QMessageBox.information(self, "提示", "当前没有历史记录")
+            return
+        reply = QMessageBox.warning(
+            self,
+            "清空本插件历史",
+            f"确定清空「{self.ext.name}」的全部 {len(hist)} 条历史记录吗？\n"
+            "快照与压缩包文件也会删除，且不可恢复。\n\n"
+            "这不会卸载浏览器中的扩展本身。",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No,
+        )
+        if reply != QMessageBox.StandardButton.Yes:
+            return
+        n = self.store.clear_history(self.ext.uid, delete_files=True)
+        self.history_changed = True
+        QMessageBox.information(self, "已清空", f"已删除 {n} 条历史记录。")
+        self.reload()
+
     def _open_files(self) -> None:
-        rec = self._selected_record()
-        if rec is None:
+        selected = self._selected_records()
+        if not selected:
             QMessageBox.information(self, "提示", "请先选择一个版本")
             return
+        if len(selected) > 1:
+            QMessageBox.information(self, "提示", "打开位置时请只选择一个版本")
+            return
+        rec = selected[0]
         path = ""
         if rec.snapshot_path and Path(rec.snapshot_path).exists():
             path = rec.snapshot_path
@@ -199,10 +282,14 @@ class VersionDialog(QDialog):
         return dest
 
     def _export_selected(self, fmt: str) -> None:
-        rec = self._selected_record()
-        if rec is None:
+        selected = self._selected_records()
+        if not selected:
             QMessageBox.information(self, "提示", "请先选择一个版本")
             return
+        if len(selected) > 1:
+            QMessageBox.information(self, "提示", "导出时请只选择一个版本")
+            return
+        rec = selected[0]
         dest = self._ask_export_path(self._default_export_name(rec.version, fmt), fmt)
         if dest is None:
             return

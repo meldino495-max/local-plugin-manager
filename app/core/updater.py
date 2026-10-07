@@ -62,6 +62,22 @@ def _safe_segment(text: str) -> str:
     return "".join(keep)[:80] or "ext"
 
 
+def _assert_managed_asset(path: Path, *, kind: str) -> Path:
+    """
+    Ensure archive/snapshot paths used for restore/export stay under the
+    app-managed data tree (versions / archives / temp). Blocks a tampered
+    store.json from pointing at arbitrary filesystem locations.
+    """
+    try:
+        resolved = path.expanduser().resolve()
+    except OSError as e:
+        raise ArchiveError(f"无效的{kind}路径: {e}") from e
+    roots = (versions_root(), archives_root(), temp_root())
+    if not any(_is_within(root, resolved) for root in roots):
+        raise ArchiveError(f"{kind}路径不在缓存目录内，已拒绝: {resolved}")
+    return resolved
+
+
 class ExtensionUpdater:
     def __init__(self, store: AppStore) -> None:
         self.store = store
@@ -201,11 +217,22 @@ class ExtensionUpdater:
         work: Path | None = None
         try:
             if record.snapshot_path and Path(record.snapshot_path).is_dir():
-                source_dir = Path(record.snapshot_path)
+                try:
+                    source_dir = _assert_managed_asset(
+                        Path(record.snapshot_path), kind="快照"
+                    )
+                except ArchiveError as e:
+                    return UpdateResult(False, str(e))
             elif record.archive_path and Path(record.archive_path).is_file():
+                try:
+                    arch = _assert_managed_asset(
+                        Path(record.archive_path), kind="压缩包"
+                    )
+                except ArchiveError as e:
+                    return UpdateResult(False, str(e))
                 work = temp_root() / f"restore_{uuid.uuid4().hex}"
                 extract_dir = work / "extracted"
-                extract_archive(Path(record.archive_path), extract_dir)
+                extract_archive(arch, extract_dir)
                 root = find_extension_root(extract_dir)
                 if root is None:
                     return UpdateResult(False, "历史压缩包中找不到 manifest.json")
@@ -302,7 +329,12 @@ class ExtensionUpdater:
 
         # Fast path: already have archive in the requested format
         if record.archive_path and Path(record.archive_path).is_file():
-            src_arch = Path(record.archive_path)
+            try:
+                src_arch = _assert_managed_asset(
+                    Path(record.archive_path), kind="压缩包"
+                )
+            except ArchiveError as e:
+                return UpdateResult(False, str(e))
             src_suf = src_arch.suffix.lower()
             want_7z = fmt in {"7z", "7zip"}
             same = (want_7z and src_suf in {".7z", ".7zip"}) or (
@@ -325,11 +357,16 @@ class ExtensionUpdater:
         try:
             source_dir: Path | None = None
             if record.snapshot_path and Path(record.snapshot_path).is_dir():
-                source_dir = Path(record.snapshot_path)
+                source_dir = _assert_managed_asset(
+                    Path(record.snapshot_path), kind="快照"
+                )
             elif record.archive_path and Path(record.archive_path).is_file():
+                arch = _assert_managed_asset(
+                    Path(record.archive_path), kind="压缩包"
+                )
                 work = temp_root() / f"export_{uuid.uuid4().hex}"
                 extract_dir = work / "extracted"
-                extract_archive(Path(record.archive_path), extract_dir)
+                extract_archive(arch, extract_dir)
                 root = find_extension_root(extract_dir)
                 if root is None:
                     return UpdateResult(False, "历史压缩包中找不到 manifest.json，无法导出")

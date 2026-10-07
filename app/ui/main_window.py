@@ -107,6 +107,13 @@ class MainWindow(QMainWindow):
         act_import_hist.triggered.connect(self._import_history)
         toolbar.addAction(act_import_hist)
 
+        act_clear_hist = QAction("清空全部历史", self)
+        act_clear_hist.setToolTip(
+            "一键删除所有插件的版本历史记录，并清理对应快照/压缩包（不可恢复）"
+        )
+        act_clear_hist.triggered.connect(self._clear_all_history)
+        toolbar.addAction(act_clear_hist)
+
         toolbar.addSeparator()
         self.btn_hide_store = QPushButton()
         self.btn_hide_store.setCheckable(True)
@@ -628,9 +635,46 @@ class MainWindow(QMainWindow):
         else:
             QMessageBox.critical(self, "更新失败", result.message)
 
+    def _clear_all_history(self) -> None:
+        total = sum(len(m.history) for m in self.store.meta.values())
+        if total == 0:
+            QMessageBox.information(self, "提示", "当前没有任何版本历史记录。")
+            return
+        plugins = sum(1 for m in self.store.meta.values() if m.history)
+        reply = QMessageBox.warning(
+            self,
+            "清空全部历史",
+            f"确定删除所有插件的版本历史吗？\n\n"
+            f"共 {plugins} 个插件、{total} 条记录。\n"
+            "关联的快照与压缩包文件也会删除，且不可恢复。\n\n"
+            "这不会卸载浏览器中已安装的扩展。",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No,
+        )
+        if reply != QMessageBox.StandardButton.Yes:
+            return
+        # Second confirm for destructive global action
+        reply2 = QMessageBox.question(
+            self,
+            "再次确认",
+            "真的要清空全部历史记录吗？此操作无法撤销。",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No,
+        )
+        if reply2 != QMessageBox.StandardButton.Yes:
+            return
+        removed, touched = self.store.clear_all_history(delete_files=True)
+        QMessageBox.information(
+            self,
+            "已清空",
+            f"已删除 {removed} 条历史记录（涉及 {touched} 个插件）。",
+        )
+        self.refresh()
+
     def _open_history(self, ext: ExtensionInfo) -> None:
         dlg = VersionDialog(ext, self.store, self.updater, self)
-        if dlg.exec():
+        dlg.exec()
+        if dlg.history_changed:
             self.refresh()
 
     def closeEvent(self, event) -> None:  # noqa: N802

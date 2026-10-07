@@ -629,7 +629,7 @@ def download_gdrive(file_id: str, dest_dir: Path, progress: ProgressCb | None = 
         raise DownloadError("无效的 Google Drive 文件 ID")
 
     opener, _jar = _opener(allow_http=False)
-    first_url = f"https://drive.google.com/uc?export=download&id={file_id}"
+    first_url = f"https://drive.google.com/uc?export=download&id={quote(file_id, safe='')}"
     assert_url_safe(first_url, allow_http=False)
     try:
         resp = opener.open(_request(first_url), timeout=60)
@@ -670,13 +670,20 @@ def download_gdrive(file_id: str, dest_dir: Path, progress: ProgressCb | None = 
     else:
         confirm, file_uuid = parsed
 
+    # Restrict confirm/uuid to safe query characters before interpolating.
+    if not re.fullmatch(r"[0-9A-Za-z_-]{1,128}", confirm or ""):
+        confirm = "t"
+    if file_uuid and not re.fullmatch(r"[0-9A-Za-z_-]{1,128}", file_uuid):
+        file_uuid = ""
+
     # Only allow known Google hosts for the confirm hop
     second = (
         f"https://drive.usercontent.google.com/download"
-        f"?id={file_id}&export=download&confirm={confirm}"
+        f"?id={quote(file_id, safe='')}"
+        f"&export=download&confirm={quote(confirm, safe='')}"
     )
     if file_uuid:
-        second += f"&uuid={file_uuid}"
+        second += f"&uuid={quote(file_uuid, safe='')}"
     assert_url_safe(second, allow_http=False)
     if urlparse(second).hostname not in _GDRIVE_HOSTS:
         raise DownloadError("Google Drive 确认下载跳转到了非预期主机")

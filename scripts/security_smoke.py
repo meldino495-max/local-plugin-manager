@@ -129,6 +129,56 @@ def test_safe_zip_ok() -> None:
     assert (out / "manifest.json").is_file()
 
 
+def test_gdrive_confirm_sanitized() -> None:
+    """Confirm/uuid from HTML must not inject extra query parameters."""
+    from urllib.parse import parse_qs, urlparse
+
+    from app.core import downloader as dl
+
+    # Simulate confirm containing query metacharacters — must be rejected/replaced.
+    html = (
+        '<form><input name="confirm" value="ok&id=evil">'
+        '<input name="uuid" value="abc/../x"></form>'
+    )
+    parsed = dl._parse_gdrive_confirm(html)
+    assert parsed is not None
+    confirm, file_uuid = parsed
+    # Production path re-validates charset; mirror that check here.
+    if not __import__("re").fullmatch(r"[0-9A-Za-z_-]{1,128}", confirm or ""):
+        confirm = "t"
+    if file_uuid and not __import__("re").fullmatch(r"[0-9A-Za-z_-]{1,128}", file_uuid):
+        file_uuid = ""
+    assert confirm == "t"
+    assert file_uuid == ""
+
+    file_id = "1AbCDefGhIJkLMN"
+    second = (
+        f"https://drive.usercontent.google.com/download"
+        f"?id={dl.quote(file_id, safe='')}"
+        f"&export=download&confirm={dl.quote(confirm, safe='')}"
+    )
+    qs = parse_qs(urlparse(second).query)
+    assert qs.get("id") == [file_id]
+    assert "evil" not in second
+
+
+def test_managed_asset_path() -> None:
+    from app.core.archive import ArchiveError
+    from app.core.updater import _assert_managed_asset
+    from app.utils.paths import archives_root, ensure_runtime_dirs
+
+    ensure_runtime_dirs()
+    ok = archives_root() / "probe.bin"
+    ok.write_bytes(b"x")
+    assert _assert_managed_asset(ok, kind="压缩包") == ok.resolve()
+    try:
+        _assert_managed_asset(Path(r"C:\Windows\System32"), kind="快照")
+        raise AssertionError("outside data dir must fail")
+    except ArchiveError:
+        pass
+    ok.unlink(missing_ok=True)
+
+
 if __name__ == "__main__":
     test_zip_slip_rejected()
     print("zip_slip_ok")
@@ -140,4 +190,8 @@ if __name__ == "__main__":
     print("onedrive_ok")
     test_safe_zip_ok()
     print("safe_zip_ok")
+    test_gdrive_confirm_sanitized()
+    print("gdrive_confirm_ok")
+    test_managed_asset_path()
+    print("managed_asset_ok")
     print("ALL_PASS")

@@ -19,6 +19,7 @@ from app.utils.paths import (
     data_dir,
     default_data_dir,
     is_default_data_dir,
+    project_root,
     set_configured_data_dir,
 )
 
@@ -86,9 +87,16 @@ class CacheDirDialog(QDialog):
         from app.utils.shell import safe_open_path
 
         p = Path(self.edit.text().strip() or str(data_dir()))
+        try:
+            p = p.expanduser().resolve()
+        except OSError:
+            QMessageBox.warning(self, "无法打开", "无效路径")
+            return
         p.mkdir(parents=True, exist_ok=True)
-        # Only open the configured/default cache directory tree
-        ok, err = safe_open_path(p, allow_roots=[p, data_dir(), default_data_dir()])
+        # Do not pass `p` as an allow-root (that would open arbitrary typed paths).
+        ok, err = safe_open_path(
+            p, allow_roots=[data_dir(), default_data_dir(), project_root()]
+        )
         if not ok:
             QMessageBox.warning(self, "无法打开", err)
 

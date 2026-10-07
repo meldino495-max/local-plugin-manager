@@ -2,10 +2,12 @@ from __future__ import annotations
 
 import json
 import logging
+import shutil
+from pathlib import Path
 from typing import Any
 
 from app.models.extension import ExtMeta, VersionRecord
-from app.utils.paths import store_path
+from app.utils.paths import archives_root, store_path, versions_root
 
 log = logging.getLogger(__name__)
 
@@ -120,6 +122,124 @@ class AppStore:
             if h.is_latest:
                 return h
         return hist[-1] if hist else None
+
+    @staticmethod
+    def _is_under(root: Path, target: Path) -> bool:
+        try:
+            target.resolve().relative_to(root.resolve())
+            return True
+        except (ValueError, OSError):
+            return False
+
+    def _delete_record_files(self, record: VersionRecord) -> None:
+        """Remove snapshot/archive files that live under managed cache roots."""
+        try:
+            vroot = versions_root()
+            aroot = archives_root()
+        except Exception:
+            log.exception("resolve cache roots for history delete")
+            return
+
+        for raw, kind in (
+            (record.snapshot_path, "snapshot"),
+            (record.archive_path, "archive"),
+        ):
+            if not (raw or "").strip():
+                continue
+            try:
+                path = Path(raw).expanduser().resolve()
+            except OSError:
+                continue
+            if not (self._is_under(vroot, path) or self._is_under(aroot, path)):
+                log.warning("skip deleting unmanaged %s path: %s", kind, path)
+                continue
+            try:
+                if path.is_dir():
+                    shutil.rmtree(path, ignore_errors=True)
+                elif path.is_file():
+                    path.unlink(missing_ok=True)
+            except OSError:
+                log.warning("failed to delete %s %s", kind, path, exc_info=True)
+
+    def _reassign_latest(self, meta: ExtMeta) -> None:
+        for h in meta.history:
+            h.is_latest = False
+        if meta.history:
+            meta.history[-1].is_latest = True
+
+    def delete_versions(
+        self,
+        uid: str,
+        record_ids: list[str] | set[str],
+        *,
+        delete_files: bool = True,
+    ) -> int:
+        """Delete selected history records for one plugin. Returns removed count."""
+        id_set = {str(x) for x in record_ids if x}
+        if not id_set:
+            return 0
+        meta = self.get_meta(uid)
+        keep: list[VersionRecord] = []
+        removed = 0
+        for h in meta.history:
+            if h.id in id_set:
+                if delete_files:
+                    self._delete_record_files(h)
+                removed += 1
+            else:
+                keep.append(h)
+        if removed == 0:
+            return 0
+        meta.history = keep
+        self._reassign_latest(meta)
+        self.save()
+        return removed
+
+    def clear_history(self, uid: str, *, delete_files: bool = True) -> int:
+        """Delete all history for one plugin. Returns removed count."""
+        meta = self.get_meta(uid)
+        n = len(meta.history)
+        if n == 0:
+            return 0
+        if delete_files:
+            for h in meta.history:
+                self._delete_record_files(h)
+        meta.history = []
+        self.save()
+        return n
+
+    def clear_all_history(self, *, delete_files: bool = True) -> tuple[int, int]:
+        """
+        Delete history for every plugin in the store.
+        Returns (removed_records, plugins_touched).
+        """
+        removed = 0
+        touched = 0
+        for uid, meta in list(self.meta.items()):
+            if not meta.history:
+                continue
+            touched += 1
+            if delete_files:
+                for h in meta.history:
+                    self._delete_record_files(h)
+            removed += len(meta.history)
+            meta.history = []
+
+        # Drop imported-only stubs that no longer carry any history
+        if self.imported_plugins:
+            still: list[dict[str, Any]] = []
+            for item in self.imported_plugins:
+                uid = str(item.get("uid") or "")
+                if uid and self.get_meta(uid).history:
+                    still.append(item)
+                elif not uid:
+                    still.append(item)
+                # else: drop empty imported stub
+            self.imported_plugins = still
+
+        if removed:
+            self.save()
+        return removed, touched
 
     def set_hide_webstore(self, hide: bool) -> None:
         self.hide_webstore = bool(hide)

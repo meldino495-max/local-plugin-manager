@@ -1,6 +1,6 @@
-# 本地插件管理器 — Python 3.10+
-# py7zr>=1.1.3: fixes CVE-2026-23879 / CVE-2026-55195 / CVE-2026-55206
-# PyQt6-Qt6>=6.11.2: Qt Network/XML DoS fixes (CVE-2026-76151 / CVE-2026-78253)
+# Local Plugin Manager — Python 3.10+
+# py7zr>=1.1.3: CVE-2026-23879 / CVE-2026-55195 / CVE-2026-55206
+# PyQt6-Qt6>=6.11.2: Qt Network/XML DoS (CVE-2026-76151 / CVE-2026-78253)
 PyQt6>=6.11.0
 PyQt6-Qt6>=6.11.2
 py7zr>=1.1.3
