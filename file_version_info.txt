@@ -3,8 +3,8 @@
 # Keep in sync with app.__version__
 VSVersionInfo(
   ffi=FixedFileInfo(
-    filevers=(1, 0, 3, 0),
-    prodvers=(1, 0, 3, 0),
+    filevers=(1, 0, 4, 0),
+    prodvers=(1, 0, 4, 0),
     mask=0x3F,
     flags=0x0,
     OS=0x40004,
@@ -20,12 +20,12 @@ VSVersionInfo(
           [
             StringStruct("CompanyName", ""),
             StringStruct("FileDescription", "本地插件管理器"),
-            StringStruct("FileVersion", "1.0.3"),
+            StringStruct("FileVersion", "1.0.4"),
             StringStruct("InternalName", "本地插件管理器"),
             StringStruct("LegalCopyright", ""),
             StringStruct("OriginalFilename", "本地插件管理器.exe"),
             StringStruct("ProductName", "本地插件管理器"),
-            StringStruct("ProductVersion", "1.0.3"),
+            StringStruct("ProductVersion", "1.0.4"),
           ],
         ),
         StringTable(
@@ -33,12 +33,12 @@ VSVersionInfo(
           [
             StringStruct("CompanyName", ""),
             StringStruct("FileDescription", "Local Plugin Manager"),
-            StringStruct("FileVersion", "1.0.3"),
+            StringStruct("FileVersion", "1.0.4"),
             StringStruct("InternalName", "LocalPluginManager"),
             StringStruct("LegalCopyright", ""),
             StringStruct("OriginalFilename", "本地插件管理器.exe"),
             StringStruct("ProductName", "本地插件管理器"),
-            StringStruct("ProductVersion", "1.0.3"),
+            StringStruct("ProductVersion", "1.0.4"),
           ],
         ),
       ]
